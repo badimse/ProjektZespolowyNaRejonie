@@ -1,7 +1,11 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework import generics, status, viewsets
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework.decorators import action
+from rest_framework.views import APIView
+from django.contrib.auth import update_session_auth_hash
 
 
 class IsAuthenticatedOrReadOnly(BasePermission):
@@ -15,6 +19,11 @@ class IsAuthenticatedOrReadOnly(BasePermission):
         return request.user and request.user.is_authenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import transaction
@@ -31,6 +40,63 @@ from .models import (
 )
 
 User = get_user_model()
+
+
+class PasswordResetRequestView(APIView):
+    """Wysyła link do resetowania hasła na podany adres e-mail."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({"detail": "E-mail jest wymagany."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = User.objects.filter(email=email).first()
+        if user:
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            
+            # W środowisku produkcyjnym link powinien prowadzić do frontendu
+            # np. frontend_url = f"http://localhost:8080/reset-password.html?uid={uid}&token={token}"
+            # W środowisku produkcyjnym zastąp localhost:5500 przez domenę frontendu (np. 'https://narejonie.com.pl')
+            frontend_url = f"http://localhost:5500/frontend/reset-password.html?uid={uid}&token={token}"
+            
+            send_mail(
+                subject='Resetowanie hasła - NaRejonie',
+                message=f'Kliknij w poniższy link, aby zresetować hasło:\n{frontend_url}',
+                from_email=settings.DEFAULT_FROM_EMAIL if hasattr(settings, 'DEFAULT_FROM_EMAIL') else 'noreply@narejonie.com',
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            
+        # Zawsze zwracamy 200 OK ze względów bezpieczeństwa (zapobiega to enumeracji użytkowników)
+        return Response({"detail": "Jeśli podany e-mail istnieje w bazie, wysłano na niego link do resetu hasła."}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    """Ustawia nowe hasło na podstawie poprawnego tokenu."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        uidb64 = request.data.get('uid')
+        token = request.data.get('token')
+        new_password = request.data.get('password')
+
+        if not uidb64 or not token or not new_password:
+            return Response({"detail": "Brakujące dane."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+
+        if user is not None and default_token_generator.check_token(user, token):
+            user.set_password(new_password)
+            user.save()
+            return Response({"detail": "Hasło zostało pomyślnie zresetowane."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Link do resetu hasła jest nieprawidłowy lub wygasł."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -626,3 +692,29 @@ class OpiniaAdminViewSet(viewsets.ModelViewSet):
         opinia = get_object_or_404(Opinia, id_opinia=pk)
         opinia.delete()
         return Response({'detail': 'Opinia usunięta'})
+    
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated] # Tylko zalogowani mogą zmieniać hasło
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+
+        # 1. Sprawdź czy stare hasło jest poprawne
+        if not user.check_password(old_password):
+            return Response(
+                {"detail": "Obecne hasło jest nieprawidłowe."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Ustaw nowe hasło (Django automatycznie je zahaszuje)
+        user.set_password(new_password)
+        user.save()
+
+        # 3. Ważne: aktualizacja sesji, aby użytkownik nie został wylogowany
+        update_session_auth_hash(request, user)
+
+        return Response(
+            {"detail": "Hasło zostało pomyślnie zmienione."}, 
+            status=status.HTTP_200_OK)

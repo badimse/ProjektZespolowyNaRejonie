@@ -372,7 +372,7 @@ async function deleteProduct(productId) {
     }
 }
 
-// Obsługa formularza produktu
+// Obsługa formularza produktu (Poprawiona dla zdjęć!)
 async function handleProductSubmit(e) {
     e.preventDefault();
     
@@ -395,27 +395,36 @@ async function handleProductSubmit(e) {
     
     console.log('Rozmiary:', rozmiaryData);
     
-    // Przygotuj dane JSON
-    const productData = {
-        nazwa: document.getElementById('productNazwa').value,
-        kategoria: category,
-        cenaBrutto: parseFloat(document.getElementById('productCena').value),
-        kolor: document.getElementById('productKolor').value,
-        opis: document.getElementById('productOpis').value,
-        rozmiary_data: rozmiaryData
-    };
+    // Przygotuj dane Używamy FormData zamiast zwykłego obiektu JSON
+    const formData = new FormData();
+    formData.append('nazwa', document.getElementById('productNazwa').value);
+    formData.append('kategoria', category);
+    formData.append('cenaBrutto', document.getElementById('productCena').value);
+    formData.append('kolor', document.getElementById('productKolor').value);
+    formData.append('opis', document.getElementById('productOpis').value);
     
-    console.log('Zapis produktu:', productId ? 'Edycja' : 'Dodawanie', productData);
+    // Tablice i obiekty (jak rozmiary) trzeba zamienić na string, gdy używamy FormData
+    formData.append('rozmiary_data', JSON.stringify(rozmiaryData));
+    
+    // Dodajemy plik zdjęcia TYLKO jeśli został wybrany 
+    // (żeby nie nadpisać pustym polem przy edycji produktu)
+    if (productFile) {
+        // Zwróć uwagę na nazwę 'zdjecie' - musi pasować do pola w Django!
+        formData.append('zdjecie', productFile); 
+    }
+    
+    console.log('Zapis produktu:', productId ? 'Edycja' : 'Dodawanie');
     
     try {
         const token = getAuthToken();
         const config = {
             method: productId ? 'PATCH' : 'POST',
             headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+                // UWAGA KRYTYCZNA: Przy wysyłaniu FormData NIE WOLNO ustawiać 'Content-Type'!
+                // Przeglądarka musi sama wygenerować nagłówek 'multipart/form-data; boundary=...'
             },
-            body: JSON.stringify(productData),
+            body: formData, // Wysyłamy fizyczną paczkę, a nie tekst JSON
         };
         
         const response = await fetch(`${API_BASE_URL}/produkty/${productId ? productId + '/' : ''}`, config);

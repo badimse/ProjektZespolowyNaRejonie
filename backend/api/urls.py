@@ -4,7 +4,7 @@ from .views import (
     CustomTokenObtainPairView, RegisterView, ProfileView,
     ProduktViewSet, KoszykViewSet, ZamowienieViewSet,
     ZamowienieAdminViewSet, OpiniaViewSet, ZwrotViewSet, ZwrotAdminViewSet,
-    UserAdminViewSet, OpiniaAdminViewSet
+    UserAdminViewSet, OpiniaAdminViewSet, PasswordResetRequestView, PasswordResetConfirmView, PasswordChangeView
 )
 
 router = DefaultRouter()
@@ -26,6 +26,9 @@ urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/register/', RegisterView.as_view(), name='auth_register'),
     path('auth/profile/', ProfileView.as_view(), name='profile'),
+    path('auth/password-change/', PasswordChangeView.as_view(), name='password_change'),
+    path('auth/password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
+    path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     
     # Główne endpointy API
     path('', include(router.urls)),
