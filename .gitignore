@@ -1,9 +1,30 @@
+# Zmienne środowiskowe i hasła (BARDZO WAŻNE!)
+.env
+
+# Środowisko wirtualne Pythona
 venv/
+env/
+
+# Cache i pliki tymczasowe Pythona
 __pycache__/
 *.pyc
-.env
-db.sqlite3
+*.pyo
+*.pyd
+
+# Wygenerowane pliki statyczne Django
+backend/staticfiles/
+staticfiles/
+
+# Zależności Node.js (jeśli będziesz miał)
+node_modules/
+
+# Logi serwera
 nohup.out
 *.log
-.gitignore
-.gitignore
+
+# Bazy danych SQLite (jeśli używasz lokalnie i nie chcesz ich wysyłać)
+db.sqlite3
+
+# Systemowe pliki ukryte
+.DS_Store
+Thumbs.db

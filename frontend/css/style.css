@@ -521,20 +521,20 @@ button {
     background: rgba(0, 0, 0, 0.7);
 }
 
+/* 1. Poprawiony modal (dodane poprawne 'hidden' z dwoma 'd') */
 /* BIAŁE OKIENKO */
 .modal-content {
     position: relative;
     background: white;
-    padding: 2.5rem;
-    border-radius: 15px;
+    padding: 20px;
+    border-radius: 12px;
     width: 90%;          /* Responsywność */
     max-width: 450px;    /* Stała, elegancka szerokość */
     max-height: 90vh;
-    overflow-y: auto;
+    overflow: hidden;    /* Zatrzymuje wszystko, co wychodzi poza zaokrąglone rogi (teraz poprawnie napisane) */
     z-index: 3001;
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    /* Resetujemy wyrównanie dla zawartości */
-    text-align: left; 
+    text-align: left;    /* Resetujemy wyrównanie dla zawartości */
 }
 
 .modal-large {
@@ -564,6 +564,24 @@ button {
     margin-bottom: 1.5rem;
     text-align: center; /* Napis będzie na środku okienka */
     font-size: 1.8rem;
+}
+
+.opinions-scroll-container {
+    max-height: 250px; 
+    overflow-y: auto;  
+    padding-right: 10px;
+    margin-top: 15px;
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+}
+
+.opinions-scroll-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.opinions-scroll-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 10px;
 }
 
 /* Forms */
@@ -606,8 +624,15 @@ button {
 
 .modal-content form {
     width: 100%;
-    max-width: 100%;
+    /* Możesz zostawić to 80% jeśli chcesz węższy formularz, ale 100% wygląda tu naturalniej */
+    /* max-width: 80%; */ 
     margin: 0 auto;
+    
+    /* TO JEST KLUCZOWE - suwak przenosimy do formularza */
+    /* 90vh minus marginesy/paddingi z .modal-content, żeby formularz nie wyszedł dołem */
+    max-height: calc(90vh - 80px); 
+    overflow-y: auto; /* auto sprawi, że suwak pokaże się TYLKO gdy braknie miejsca */
+    padding-right: 5px; /* Minimalny odstęp od suwaka, żeby tekst do niego nie dotykał */
 }
 
 .modal-content .form-group {

@@ -1,3 +1,4 @@
+import stripe
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from rest_framework import generics, status, viewsets
@@ -59,15 +60,15 @@ class PasswordResetRequestView(APIView):
             # W środowisku produkcyjnym link powinien prowadzić do frontendu
             # np. frontend_url = f"http://localhost:8080/reset-password.html?uid={uid}&token={token}"
             # W środowisku produkcyjnym zastąp localhost:5500 przez domenę frontendu (np. 'https://narejonie.com.pl')
-            frontend_url = f"http://localhost:5500/frontend/reset-password.html?uid={uid}&token={token}"
+            frontend_url = f"https://narejonie.com.pl/reset-password.html?uid={uid}&token={token}"
             
             send_mail(
                 subject='Resetowanie hasła - NaRejonie',
                 message=f'Kliknij w poniższy link, aby zresetować hasło:\n{frontend_url}',
-                from_email=settings.DEFAULT_FROM_EMAIL if hasattr(settings, 'DEFAULT_FROM_EMAIL') else 'noreply@narejonie.com',
+                from_email=settings.DEFAULT_FROM_EMAIL, # Bezpieczniejsze, bierze prosto z settings
                 recipient_list=[user.email],
                 fail_silently=False,
-            )
+)
             
         # Zawsze zwracamy 200 OK ze względów bezpieczeństwa (zapobiega to enumeracji użytkowników)
         return Response({"detail": "Jeśli podany e-mail istnieje w bazie, wysłano na niego link do resetu hasła."}, status=status.HTTP_200_OK)
@@ -357,12 +358,7 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def checkout(self, request):
         """
-        Złożenie zamówienia (Transakcja ACID).
-        - Sprawdzenie stanu magazynowego (Race Condition prevention)
-        - Przepisanie produktów z koszyka
-        - Zamrożenie cen
-        - Zmniejszenie stanu magazynowego
-        - Wyczyszczenie koszyka
+        Złożenie zamówienia i wygenerowanie linku do płatności Stripe.
         """
         koszyk = get_object_or_404(Koszyk, id_uzytkownik=request.user)
         pozycje_koszyka = koszyk.pozycje.all()
@@ -388,15 +384,16 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
             )
         
         try:
+            line_items = [] # <-- Lista produktów dla Stripe
+            
             with transaction.atomic():
                 kwota_calkowita = 0
                 
-                # Najpierw sprawdź i zablokuj wszystkie produkty
+                # Sprawdzanie dostępności
                 for pozycja in pozycje_koszyka:
                     produkt = Produkt.objects.select_for_update().get(
                         id_produkt=pozycja.id_produkt_id
                     )
-                    # Oblicz całkowity stan ze wszystkich rozmiarów
                     total_stock = sum(r.stanMagazynowy for r in produkt.rozmiary.select_for_update().all())
                     if total_stock < pozycja.ilosc:
                         raise ValueError(
@@ -405,17 +402,16 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
                     
                     kwota_calkowita += pozycja.ilosc * pozycja.cenaJednostkowa
                 
-                # Utwórz zamówienie
+                # Utwórz zamówienie w bazie (pozostaje jako "oczekujące")
                 zamowienie = Zamowienie.objects.create(
                     id_uzytkownik=request.user,
                     status='oczekujące',
                     kwota=kwota_calkowita
                 )
                 
-                # Zapisz adres dostawy
                 adres_serializer.save(id_zamowienie=zamowienie)
                 
-                # Przepisz pozycje z koszyka do zamówienia
+                # Przepisanie pozycji i budowanie listy dla Stripe
                 for pozycja in pozycje_koszyka:
                     PozycjaZamowienia.objects.create(
                         id_zamowienie=zamowienie,
@@ -424,7 +420,20 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
                         cenaJednostkowa=pozycja.cenaJednostkowa
                     )
                     
-                    # Zmniejsz stan magazynowy - odejmij od pierwszego dostępnego rozmiaru
+                    # DODANE: Budujemy element koszyka dla Stripe
+                    # Stripe wymaga podania ceny w najmniejszej jednostce (czyli w groszach)
+                    line_items.append({
+                        'price_data': {
+                            'currency': 'pln',
+                            'product_data': {
+                                'name': pozycja.id_produkt.nazwa,
+                            },
+                            'unit_amount': int(pozycja.cenaJednostkowa * 100), 
+                        },
+                        'quantity': pozycja.ilosc,
+                    })
+                    
+                    # Zmniejszanie stanu magazynowego
                     produkt = pozycja.id_produkt
                     ilosc_do_odjecia = pozycja.ilosc
                     for rozmiar in produkt.rozmiary.select_for_update().all():
@@ -440,17 +449,42 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
                                 rozmiar.stanMagazynowy = 0
                                 rozmiar.save()
                 
-                # Wyczyść koszyk
+                # Wyczyść koszyk na sam koniec
                 pozycje_koszyka.delete()
-                
+
+            # --- INTEGRACJA Z BRAMKĄ STRIPE ---
+            # Definiujemy gdzie Stripe ma odesłać klienta po płatności (sukces lub błąd)
+            domain_url = "https://narejonie.com.pl"
+            
+            checkout_session = stripe.checkout.Session.create(
+                payment_method_types=['card', 'blik', 'p24'], # Włączamy Blika i Przelewy24!
+                line_items=line_items,
+                mode='payment',
+                success_url=domain_url + '/index.html?payment=success', # Możesz dorobić później dedykowaną stronę
+                cancel_url=domain_url + '/index.html?payment=cancelled',
+                client_reference_id=str(zamowienie.id_zamowienie),
+                customer_email=request.user.email, # Opcjonalnie, wstawia maila klienta do formularza płatności
+            )
+
         except ValueError as e:
             return Response(
                 {"detail": str(e)}, 
                 status=status.HTTP_409_CONFLICT
             )
+        except stripe.error.StripeError as e:
+            # Gdyby Stripe miał awarię (np. błędny klucz API)
+            return Response(
+                {"detail": f"Błąd bramki płatności: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         
         serializer = self.get_serializer(zamowienie)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        # ZWRACAMY NOWY LINK DO PŁATNOŚCI
+        return Response({
+            'zamowienie': serializer.data,
+            'checkout_url': checkout_session.url
+        }, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
     def anuluj(self, request, pk=None):
@@ -517,16 +551,15 @@ class OpiniaViewSet(viewsets.ModelViewSet):
     queryset = Opinia.objects.all()
     serializer_class = OpiniaSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
-    
+
+        # Pobieramy ID produktu  
     def get_queryset(self):
-        queryset = Opinia.objects.all()
-        
-        # Filtrowanie po produkcie
         id_produkt = self.request.query_params.get('id_produkt')
-        if id_produkt:
-            queryset = queryset.filter(id_produkt=id_produkt)
         
-        return queryset
+        if id_produkt:
+            return Opinia.objects.filter(id_produkt=id_produkt)
+        
+        return Opinia.objects.none()
     
     def perform_create(self, serializer):
         serializer.save(id_uzytkownik=self.request.user)
@@ -661,7 +694,23 @@ class UserAdminViewSet(viewsets.ModelViewSet):
         user.statusUzytkownika = 'aktywny'
         user.save()
         return Response({'detail': 'Użytkownik odblokowany'})
-
+    
+    @action(detail=True, methods=['post'])
+    def usun(self, request, pk=None):
+        """Miękkie usuwanie użytkownika (zmiana statusu)."""
+        user = get_object_or_404(User, id=pk)
+        
+        if user == request.user:
+            return Response(
+                {'detail': 'Nie możesz usunąć własnego konta administratora.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        user.statusUzytkownika = 'usunięty'
+        user.is_active = False # Blokuje całkowicie możliwość logowania w Django
+        user.save()
+        
+        return Response({'detail': 'Użytkownik oznaczony jako usunięty'})
 
 class OpiniaAdminViewSet(viewsets.ModelViewSet):
     """
@@ -718,3 +767,49 @@ class PasswordChangeView(APIView):
         return Response(
             {"detail": "Hasło zostało pomyślnie zmienione."}, 
             status=status.HTTP_200_OK)
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+import os
+import stripe
+from .models import Zamowienie
+
+@csrf_exempt
+def stripe_webhook(request):
+    """
+    Funkcja odbierająca ciche powiadomienia (Webhooki) ze Stripe.
+    """
+    payload = request.body
+    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+    endpoint_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+    try:
+        # Stripe weryfikuje, czy to na pewno on wysłał to zapytanie (bezpieczeństwo!)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        # Błędny payload
+        return HttpResponse(status=400)
+    except stripe.error.SignatureVerificationError as e:
+        # Błędny podpis (próba oszustwa)
+        return HttpResponse(status=400)
+
+    # Jeśli płatność zakończyła się pełnym sukcesem
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        
+        # Wyciągamy nasz numer zamówienia, który podaliśmy w checkout_session
+        zamowienie_id = session.client_reference_id
+
+        if zamowienie_id:
+            try:
+                zamowienie = Zamowienie.objects.get(id_zamowienie=zamowienie_id)
+                # ZMIANA STATUSU PO OPŁACENIU!
+                # Zmieniamy status na "w realizacji", co oznacza dla admina: "Opłacone, pakuj towar!"
+                zamowienie.status = 'w realizacji'
+                zamowienie.save()
+            except Zamowienie.DoesNotExist:
+                pass
+
+    return HttpResponse(status=200)

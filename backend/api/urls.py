@@ -4,7 +4,7 @@ from .views import (
     CustomTokenObtainPairView, RegisterView, ProfileView,
     ProduktViewSet, KoszykViewSet, ZamowienieViewSet,
     ZamowienieAdminViewSet, OpiniaViewSet, ZwrotViewSet, ZwrotAdminViewSet,
-    UserAdminViewSet, OpiniaAdminViewSet, PasswordResetRequestView, PasswordResetConfirmView, PasswordChangeView
+    UserAdminViewSet, OpiniaAdminViewSet, PasswordResetRequestView, PasswordResetConfirmView, PasswordChangeView, stripe_webhook
 )
 
 router = DefaultRouter()
@@ -29,6 +29,7 @@ urlpatterns = [
     path('auth/password-change/', PasswordChangeView.as_view(), name='password_change'),
     path('auth/password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
     path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
+    path('webhook/stripe/', stripe_webhook, name='stripe-webhook'),
     
     # Główne endpointy API
     path('', include(router.urls)),

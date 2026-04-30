@@ -667,13 +667,20 @@ async function loadUsers(statusFilter = '') {
                 </td>
                 <td>${new Date(user.dataRejestracji).toLocaleDateString('pl-PL')}</td>
                 <td class="actions">
-                    ${user.statusUzytkownika === 'aktywny' ? 
-                        `<button class="btn btn-sm btn-delete" onclick="blockUser(${user.id})">Zablokuj</button>` : 
-                        `<button class="btn btn-sm btn-edit" onclick="unblockUser(${user.id})">Odblokuj</button>`
+                    ${user.statusUzytkownika === 'usunięty' ? 
+                        // Jeśli jest usunięty, pokazujemy tylko tekst
+                        `<span style="color: #e74c3c; font-weight: bold;">Konto usunięte</span>` : 
+                        
+                        // Jeśli NIE JEST usunięty, pokazujemy standardowe przyciski
+                        `${user.statusUzytkownika === 'aktywny' ? 
+                            `<button class="btn btn-sm btn-delete" onclick="blockUser(${user.id})">Zablokuj</button>` : 
+                            `<button class="btn btn-sm btn-edit" onclick="unblockUser(${user.id})">Odblokuj</button>`
+                        }
+                        <button class="btn btn-sm btn-delete" style="background-color: #e74c3c; margin-left: 5px;" onclick="removeUser(${user.id})">Usuń</button>`
                     }
                 </td>
             </tr>
-        `).join('');
+        `).join(''); // <-- TUTAJ BRAKOWAŁO ZAMKNIĘCIA
     } catch (error) {
         showToast('Nie udało się załadować użytkowników', 'error');
     }
@@ -702,6 +709,7 @@ async function unblockUser(userId) {
 }
 
 // Opinie
+// Opinie
 async function loadOpinions() {
     try {
         const opinions = await adminGetOpinions();
@@ -717,16 +725,17 @@ async function loadOpinions() {
         tbody.innerHTML = opinions.map(opinia => `
             <tr>
                 <td>${opinia.id_opinia}</td>
-                <td>${opinia.produkt_nazwa || 'Produkt #' + opinia.id_produkt}</td>
-                <td>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0) || ''}.</td>
-                <td>${'⭐'.repeat(opinia.ocena)}</td>
-                <td>${opinia.komentarz || '-'}</td>
+                <td>${opinia.produkt_nazwa || '-'}</td>
+                <td>${opinia.uzytkownik_imie || '-'} ${opinia.uzytkownik_nazwisko || '-'}</td>
+                <td>${opinia.ocena}/5</td>
+                <td>${opinia.komentarz}</td>
                 <td>${new Date(opinia.data).toLocaleDateString('pl-PL')}</td>
                 <td class="actions">
                     <button class="btn btn-sm btn-delete" onclick="deleteOpinion(${opinia.id_opinia})">Usuń</button>
                 </td>
             </tr>
-        `).join('');
+        `).join(''); // <-- TUTAJ TEŻ BRAKOWAŁO ZAMKNIĘCIA
+        
     } catch (error) {
         showToast('Nie udało się załadować opinii', 'error');
     }
@@ -806,9 +815,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+async function removeUser(userId) {
+    if (!confirm('Czy na pewno chcesz usunąć to konto? Użytkownik straci do niego dostęp, ale jego zamówienia pozostaną w systemie.')) return;
+    
+    try {
+        await adminDeleteUser(userId);
+        showToast('Status zmieniony na "usunięty"', 'success');
+        loadUsers(currentUserFilter); // Odśwież listę
+    } catch (error) {
+        showToast(error.message || 'Nie udało się zmienić statusu', 'error');
+    }
+}
+
 // Udostępnij funkcje globalnie
 window.loadUsers = loadUsers;
 window.loadOpinions = loadOpinions;
 window.blockUser = blockUser;
 window.unblockUser = unblockUser;
 window.deleteOpinion = deleteOpinion;
+window.removeUser = removeUser;

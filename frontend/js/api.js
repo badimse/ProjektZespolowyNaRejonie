@@ -1,5 +1,5 @@
 // API Configuration
-const API_BASE_URL = 'http://127.0.0.1:8000/api';
+const API_BASE_URL = 'https://narejonie.com.pl/api';
 
 // Token management
 function getAuthToken() {
@@ -223,7 +223,7 @@ async function getOrderDetails(orderId) {
 
 // Opinions API
 async function getProductOpinions(produktId) {
-    return await apiRequest(`/opinie/?id_product=${produktId}`);
+    return await apiRequest(`/opinie/?id_produkt=${produktId}`);
 }
 
 async function addOpinionApi(produktId, ocena, komentarz) {
@@ -300,6 +300,12 @@ async function adminBlockUser(userId) {
 async function adminUnblockUser(userId) {
     return await apiRequest(`/admin/uzytkownicy/${userId}/odblokuj/`, {
         method: 'POST',
+    });
+}
+
+async function adminDeleteUser(userId) {
+    return await apiRequest(`/admin/uzytkownicy/${userId}/usun/`, { 
+        method: 'POST' 
     });
 }
 

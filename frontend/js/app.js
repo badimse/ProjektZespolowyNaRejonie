@@ -380,15 +380,22 @@ async function removeFromCart(pozycjaId) {
 }
 
 // Pokaż formularz checkout
-function showCheckout() {
+
+window.showCheckout = function() {
     const cartModal = document.getElementById('cartModal');
     const checkoutModal = document.getElementById('checkoutModal');
     
-    if (cartModal) cartModal.classList.remove('active');
-    if (checkoutModal) checkoutModal.classList.add('active');
+    if (cartModal) {
+        cartModal.classList.remove('active');
+        cartModal.style.display = 'none'; // Zamykamy okno koszyka
+    }
+    if (checkoutModal) {
+        checkoutModal.classList.add('active');
+        checkoutModal.style.display = 'flex'; // Otwieramy okno dostawy
+    }
 }
-
 // Obsługa checkout
+
 async function handleCheckout(e) {
     e.preventDefault();
     
@@ -409,22 +416,33 @@ async function handleCheckout(e) {
     
     try {
         console.log('handleCheckout - wysyłam checkout...');
-        const order = await checkout(adres);
-        console.log('handleCheckout - order:', order);
-        showToast('Zamówienie złożone!', 'success');
         
-        // Zamknij modal
+        // Odbieramy całą odpowiedź z backendu (zamówienie + checkout_url)
+        const response = await checkout(adres); 
+        console.log('handleCheckout - response:', response);
+        
+        // Zamknij okienko z formularzem adresu
         const modal = document.getElementById('checkoutModal');
         if (modal) modal.classList.remove('active');
         
         // Wyczyść formularz
         document.getElementById('checkoutForm')?.reset();
         
-        // Aktualizuj koszyk
+        // Zaktualizuj licznik koszyka (teraz na backendzie został wyczyszczony)
         updateCartCount();
         
-        // Pokaż potwierdzenie
-        showOrderConfirmation(order);
+        // --- KLUCZOWY MOMENT: PRZEKIEROWANIE DO STRIPE ---
+        if (response.checkout_url) {
+            showToast('Przekierowywanie do bezpiecznej płatności...', 'info');
+            // Ta komenda każe przeglądarce załadować nową stronę:
+            window.location.href = response.checkout_url; 
+        } else {
+            // Jeśli z jakiegoś powodu Stripe nie zwrócił linku
+            showToast('Zamówienie złożone, opłać przy odbiorze.', 'success');
+            // Zwracamy okienko potwierdzenia (response.zamowienie bo zmieniliśmy to w Pythonie)
+            showOrderConfirmation(response.zamowienie || response); 
+        }
+        
     } catch (error) {
         showToast(error.message || 'Nie udało się złożyć zamówienia', 'error');
     }
@@ -663,41 +681,47 @@ async function showProductDetail(produktId) {
                     ` : '<button class="btn btn-disabled" disabled>Brak w magazynie</button>'}
                     
                     <!-- Sekcja opinii -->
-                    <div class="opinions-section" style="margin-top: 2rem; border-top: 2px solid #eee; padding-top: 1.5rem;">
+<div class="opinions-section" style="margin-top: 2rem; border-top: 2px solid #eee; padding-top: 1.5rem;">
                         <h3 style="margin-bottom: 1rem;">Opinie o produkcie</h3>
-                        ${getAuthToken() ? `
-                            <div class="add-opinion-form" style="background: #f5f5f5; padding: 1rem; border-radius: 10px; margin-bottom: 1.5rem;">
-                                <h4>Dodaj opinię</h4>
-                                <div class="form-group" style="margin-bottom: 0.5rem;">
-                                    <label>Ocena</label>
-                                    <select id="opinionRating" style="width: 100%; padding: 0.5rem;">
-                                        <option value="5">⭐⭐⭐⭐⭐ - 5</option>
-                                        <option value="4">⭐⭐⭐⭐ - 4</option>
-                                        <option value="3">⭐⭐⭐ - 3</option>
-                                        <option value="2">⭐⭐ - 2</option>
-                                        <option value="1">⭐ - 1</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Komentarz</label>
-                                    <textarea id="opinionComment" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Napisz swoją opinię..."></textarea>
-                                </div>
-                                <button class="btn btn-primary" onclick="addOpinion(${product.id_produkt})">Dodaj opinię</button>
-                            </div>
-                        ` : '<p style="color: #666; margin-bottom: 1rem;">Zaloguj się, aby dodać opinię</p>'}
                         
-                        <div class="opinions-list" id="opinionsList-${product.id_produkt}">
-                            ${opinie.length > 0 ? opinie.map(opinia => `
-                                <div class="opinion-item" style="background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                        <strong>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0)}.</strong>
-                                        <span>${new Date(opinia.data).toLocaleDateString('pl-PL')}</span>
+                        <div class="opinions-scroll-container">
+                            
+                            ${getAuthToken() ? `
+                                <div class="add-opinion-form" style="background: #f5f5f5; padding: 1rem; border-radius: 10px; margin-bottom: 1.5rem;">
+                                    <h4>Dodaj opinię</h4>
+                                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                                        <label>Ocena</label>
+                                        <select id="opinionRating" style="width: 100%; padding: 0.5rem;">
+                                            <option value="5">⭐⭐⭐⭐⭐ - 5</option>
+                                            <option value="4">⭐⭐⭐⭐ - 4</option>
+                                            <option value="3">⭐⭐⭐ - 3</option>
+                                            <option value="2">⭐⭐ - 2</option>
+                                            <option value="1">⭐ - 1</option>
+                                        </select>
                                     </div>
-                                    <div style="margin-bottom: 0.5rem;">${'⭐'.repeat(opinia.ocena)}</div>
-                                    <p style="color: #555;">${opinia.komentarz || 'Brak komentarza'}</p>
+                                    <div class="form-group">
+                                        <label>Komentarz</label>
+                                        <textarea id="opinionComment" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Napisz swoją opinię..."></textarea>
+                                    </div>
+                                    <button class="btn btn-primary" onclick="addOpinion(${product.id_produkt})">Dodaj opinię</button>
                                 </div>
-                            `).join('') : '<p style="color: #999;">Brak opinii o tym produkcie</p>'}
-                        </div>
+                            ` : '<p style="color: #666; margin-bottom: 1rem;">Zaloguj się, aby dodać opinię</p>'}
+                            
+                            <div class="opinions-list" id="opinionsList-${product.id_produkt}">
+                                ${opinie.length > 0 ? opinie.map(opinia => `
+                                    <div class="opinion-item" style="background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                            <strong>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0)}.</strong>
+                                            <span>${new Date(opinia.data).toLocaleDateString('pl-PL')}</span>
+                                        </div>
+                                        <div style="margin-bottom: 0.5rem;">${'⭐'.repeat(opinia.ocena)}</div>
+                                        <p style="color: #555;">${opinia.komentarz || 'Brak komentarza'}</p>
+                                    </div>
+                                `).join('') : '<p style="color: #999;">Brak opinii o tym produkcie</p>'}
+                            </div>
+                        
+                        </div> 
+                        
                     </div>
                 </div>
             </div>
